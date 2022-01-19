@@ -20,7 +20,7 @@ from tqdm import tqdm
 import torch.nn.functional as F
 
 from zcls.config.key_word import KEY_OUTPUT
-from zcls.data.build import build_data
+# from zcls.data.build import build_data
 # from zcls.model.recognizers.build import build_recognizer
 from zcls.util.distributed import get_device
 from zcls.util import logging
@@ -30,6 +30,7 @@ logger = logging.get_logger(__name__)
 from metric.config import cfg
 from metric.config.key_word import KEY_FEATS
 from metric.model.build import build_model
+from metric.data.build import build_data
 
 
 def parse_args():
@@ -52,9 +53,10 @@ def infer(cfg, is_train=False):
     logits_list = list()
     probs_list = list()
     targets_list = list()
+    img_paths_list = list()
 
     data_loader = build_data(cfg, is_train=is_train, device_type=device.type, rank_id=0)
-    for iteration, (images, targets) in tqdm(enumerate(data_loader)):
+    for iteration, (images, targets, img_paths) in tqdm(enumerate(data_loader)):
         images = images.to(device=device, non_blocking=True)
         targets = targets.to(device=device, non_blocking=True)
 
@@ -71,23 +73,24 @@ def infer(cfg, is_train=False):
         logits_list.extend(logits.detach().cpu().numpy())
         probs_list.extend(probs.detach().cpu().numpy())
         targets_list.extend(targets.detach().cpu().numpy())
+        img_paths_list.extend(img_paths)
 
-    return feats_list, logits_list, probs_list, targets_list
+    return feats_list, logits_list, probs_list, targets_list, img_paths_list
 
 
-def save_to_csv(targets, data_list, csv_path):
+def save_to_csv(img_paths, data_list, csv_path):
     assert not os.path.exists(csv_path), csv_path
-    assert len(targets) == len(data_list)
+    assert len(img_paths) == len(data_list)
 
     print(f'save to {csv_path}')
     with open(csv_path, 'w') as f:
-        data_len = len(targets)
-        for idx, (label, items) in enumerate(zip(targets, data_list)):
+        data_len = len(img_paths)
+        for idx, (img_path, items) in enumerate(zip(img_paths, data_list)):
             item_str = ','.join(items.astype(str))
             if idx < (data_len - 1):
-                f.write(f'{label},{item_str}\n')
+                f.write(f'{img_path},{item_str}\n')
             else:
-                f.write(f'{label},{item_str}')
+                f.write(f'{img_path},{item_str}')
 
 
 def main():
@@ -104,15 +107,15 @@ def main():
     logging.setup_logging(cfg.OUTPUT_DIR)
     logger.info(args)
 
-    feats, logits, probs, targets = infer(cfg)
+    feats, logits, probs, targets, img_paths = infer(cfg)
 
     csv_suffix = 'train' if is_train else 'test'
     feats_path = f'./outputs/{csv_suffix}_feats.csv'
-    save_to_csv(targets, feats, feats_path)
+    save_to_csv(img_paths, feats, feats_path)
     logits_path = f'./outputs/{csv_suffix}_logits.csv'
-    save_to_csv(targets, logits, logits_path)
+    save_to_csv(img_paths, logits, logits_path)
     probs_path = f'./outputs/{csv_suffix}_probs.csv'
-    save_to_csv(targets, probs, probs_path)
+    save_to_csv(img_paths, probs, probs_path)
 
 
 if __name__ == '__main__':
