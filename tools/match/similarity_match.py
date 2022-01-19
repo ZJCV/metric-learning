@@ -14,9 +14,22 @@
 """
 
 import os
+import pickle
+import argparse
 
 import numpy as np
 from tqdm import tqdm
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('test_path', type=str, default=None, help='test path')
+    parser.add_argument('--N', type=int, default=5, help='number of each class in match lib')
+    parser.add_argument('--match_path', type=str, default=None, help='match path')
+
+    args = parser.parse_args()
+    print(args)
+    return args
 
 
 def load_data(csv_path):
@@ -25,6 +38,15 @@ def load_data(csv_path):
     data_array = np.loadtxt(csv_path, delimiter=',', dtype=float)
 
     return data_array
+
+
+def load_match_lib(pkl_path):
+    assert os.path.isfile(pkl_path), pkl_path
+
+    with open(pkl_path, 'rb') as f:
+        match_dict = pickle.load(f)
+
+    return match_dict
 
 
 def cosine_similarity(vector_a, vector_b):
@@ -43,11 +65,11 @@ def cosine_similarity(vector_a, vector_b):
     return sim
 
 
-def process(data_array):
+def process(data_array, match_dict, N):
     label_array = np.unique(data_array[:, 0])
-    match_dict = dict()
     for label in label_array:
-        match_dict[int(label)] = list()
+        if label not in match_dict.keys():
+            match_dict[int(label)] = list()
 
     top1_num = 0
     top5_num = 0
@@ -90,7 +112,7 @@ def process(data_array):
         # 每次完成后将预测特征向量加入模板库
         match_dict[truth_label].append(pred_feats)
         # # 如果模板库某一类别的特征数目大于指定数目，则按先进先出方式删除
-        if len(match_dict[truth_label]) > 20:
+        if len(match_dict[truth_label]) > N:
             match_dict[truth_label].pop(0)
 
     # 完成所有计算后，统计top1/top5识别率
@@ -101,7 +123,18 @@ def process(data_array):
 
 
 if __name__ == '__main__':
-    csv_path = './outputs/logits.csv'
-    data_array = load_data(csv_path)
+    args = parse_args()
+    match_path = args.match_path
+    test_path = args.test_path
+    N = args.N
 
-    process(data_array)
+    if match_path is not None:
+        assert os.path.isfile(match_path), match_path
+        match_dict = load_match_lib(match_path)
+    else:
+        match_dict = dict()
+
+    assert os.path.isfile(test_path), test_path
+    data_array = load_data(test_path)
+
+    process(data_array, match_dict, N)

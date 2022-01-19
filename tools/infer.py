@@ -13,29 +13,42 @@
 """
 
 import os
+import argparse
 
 from tqdm import tqdm
 
-import torch
 import torch.nn.functional as F
 
 from zcls.config.key_word import KEY_OUTPUT
 from zcls.data.build import build_data
-from zcls.model.recognizers.build import build_recognizer
-from zcls.util.distributed import init_distributed_training, get_device, get_local_rank, synchronize
-from zcls.util.parser import parse_args, load_config
+# from zcls.model.recognizers.build import build_recognizer
+from zcls.util.distributed import get_device
 from zcls.util import logging
 
 logger = logging.get_logger(__name__)
 
 from metric.config import cfg
+from metric.config.key_word import KEY_FEATS
+from metric.model.build import build_model
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('cfg_path', type=str, default=None, help='ZCls Config Path')
+    parser.add_argument('--train', default=False, action='store_true', help='Use Train Data. Default: False')
+
+    args = parser.parse_args()
+    print(args)
+    return args
 
 
 def infer(cfg, is_train=False):
     device = get_device(0)
-    model = build_recognizer(cfg, device)
+    # model = build_recognizer(cfg, device)
+    model = build_model(cfg, device)
     model.eval()
 
+    feats_list = list()
     logits_list = list()
     probs_list = list()
     targets_list = list()
@@ -45,16 +58,21 @@ def infer(cfg, is_train=False):
         images = images.to(device=device, non_blocking=True)
         targets = targets.to(device=device, non_blocking=True)
 
+        out_dict = model(images)
+
+        # feats
+        feats = out_dict[KEY_FEATS]
         # logits
-        logits = model(images)[KEY_OUTPUT]
+        logits = out_dict[KEY_OUTPUT]
         # probs
         probs = F.softmax(logits, dim=1)
 
+        feats_list.extend(feats.detach().cpu().numpy())
         logits_list.extend(logits.detach().cpu().numpy())
         probs_list.extend(probs.detach().cpu().numpy())
         targets_list.extend(targets.detach().cpu().numpy())
 
-    return logits_list, probs_list, targets_list
+    return feats_list, logits_list, probs_list, targets_list
 
 
 def save_to_csv(targets, data_list, csv_path):
@@ -74,7 +92,10 @@ def save_to_csv(targets, data_list, csv_path):
 
 def main():
     args = parse_args()
-    load_config(args, cfg)
+    if args.cfg_path:
+        cfg.merge_from_file(args.cfg_path)
+    cfg.freeze()
+    is_train = args.train
 
     if not os.path.exists(cfg.OUTPUT_DIR):
         os.makedirs(cfg.OUTPUT_DIR)
@@ -83,10 +104,11 @@ def main():
     logging.setup_logging(cfg.OUTPUT_DIR)
     logger.info(args)
 
-    is_train = True
-    logits, probs, targets = infer(cfg)
+    feats, logits, probs, targets = infer(cfg)
 
     csv_suffix = 'train' if is_train else 'test'
+    feats_path = f'./outputs/{csv_suffix}_feats.csv'
+    save_to_csv(targets, feats, feats_path)
     logits_path = f'./outputs/{csv_suffix}_logits.csv'
     save_to_csv(targets, logits, logits_path)
     probs_path = f'./outputs/{csv_suffix}_probs.csv'
