@@ -36,13 +36,10 @@ DATALOADER:
   RANDOM_SAMPLE: True
   PREFETCHER: True
 MODEL:
-  BACKBONE:
-    ARCH: 'resnet18'
   HEAD:
     NUM_CLASSES: 200
   RECOGNIZER:
-    NAME: 'TorchvisionResNet'
-    PRETRAINED_REMOTE: True
+    NAME: 'resnet18'
     PRELOADED: 'outputs/r18_cub200_224_e100_sgd_mslr/model_0085.pth'
   CRITERION:
     NAME: 'CrossEntropyLoss'

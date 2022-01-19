@@ -16,7 +16,7 @@ import torch
 from zcls.data.build import build_data
 from zcls.engine.trainer import do_train
 from zcls.model.criterions.build import build_criterion
-from zcls.model.recognizers.build import build_recognizer
+# from zcls.model.recognizers.build import build_recognizer
 from zcls.optim.lr_schedulers.build import build_lr_scheduler
 from zcls.optim.optimizers.build import build_optimizer
 from zcls.util import logging
@@ -29,6 +29,7 @@ from zcls.util.parser import parse_args, load_config
 logger = logging.get_logger(__name__)
 
 from metric.config import cfg
+from metric.model.build import build_model
 
 
 def train(cfg):
@@ -49,7 +50,8 @@ def train(cfg):
     arguments = {"cur_epoch": 1}
 
     device = get_device(local_rank_id)
-    model = build_recognizer(cfg, device)
+    # model = build_recognizer(cfg, device)
+    model = build_model(cfg, device)
     criterion = build_criterion(cfg, device)
     optimizer = build_optimizer(cfg, model)
     lr_scheduler = build_lr_scheduler(cfg, optimizer)
