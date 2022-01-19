@@ -1,43 +1,81 @@
 # -*- coding: utf-8 -*-
 
 """
-@date: 2022/1/17 下午7:32
-@file: confusion_matrix.py
+@date: 2022/1/19 下午4:38
+@file: compute_roc_threshold.py
 @author: zj
-@description: 混淆矩阵计算
-1. 加载测试文件
-2.
+@description: 
 """
 
 import os
+import argparse
 
 import numpy as np
-
+import matplotlib.pyplot as plt
 from sklearn.metrics import accuracy_score, precision_score, recall_score, \
-    confusion_matrix, \
-    auc, roc_curve, roc_auc_score, \
-    top_k_accuracy_score
+    confusion_matrix, auc, roc_curve, roc_auc_score, RocCurveDisplay
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('pair_path', type=str, default=None, help='pair path')
+    parser.add_argument('test_path', type=str, default=None, help='test path')
+
+    args = parser.parse_args()
+    print(args)
+    return args
+
+
+def load_pairs(csv_path):
+    assert os.path.isfile(csv_path), csv_path
+
+    pair_array = np.loadtxt(csv_path, delimiter=' ', dtype=str)
+    return pair_array
 
 
 def load_data(csv_path):
     assert os.path.isfile(csv_path), csv_path
 
-    data_array = np.loadtxt(csv_path, delimiter=',', dtype=float)
-
-    truth_list = list()
-    pred_label_list = list()
-    pred_probs_list = list()
-
+    data_array = np.loadtxt(csv_path, delimiter=',', dtype=str)
+    data_dict = dict()
     for item in data_array:
-        label = int(item[0])
-        truth_list.append(label)
+        img_path = str(item[0])
+        feats = np.array(item[1:], dtype=float)
 
-        pred_label = np.argmax(item[1:])
-        pred_label_list.append(pred_label)
+        data_dict[img_path] = feats
 
-        pred_probs_list.append(item[1:])
+    return data_dict
 
-    return np.array(truth_list), np.array(pred_label_list), np.array(pred_probs_list)
+
+def cosine_similarity(vector_a, vector_b):
+    """
+    计算两个向量之间的余弦相似度
+    :param vector_a: 向量 a
+    :param vector_b: 向量 b
+    :return: sim
+    """
+    vector_a = np.mat(vector_a)
+    vector_b = np.mat(vector_b)
+    num = float(vector_a * vector_b.T)
+    denom = np.linalg.norm(vector_a) * np.linalg.norm(vector_b)
+    cos = num / denom
+    sim = 0.5 + 0.5 * cos
+    return sim
+
+
+def compute_probs(pair_array, data_dict):
+    probs_list = list()
+    labels_list = list()
+
+    for img1, img2, label in pair_array:
+        feats_1 = data_dict[img1]
+        feats_2 = data_dict[img2]
+
+        prob = cosine_similarity(feats_1, feats_2)
+        probs_list.append(prob)
+        labels_list.append(int(label))
+
+    return probs_list, labels_list
 
 
 def score(y_pred, y_test):
@@ -69,71 +107,55 @@ def score(y_pred, y_test):
     print(cm)
 
 
-def score_roc(y_pred_prob, y_test):
-    print('roc curve ...')
-    # print('y_test[:10]:', y_test[:10])
-    # print('y_pred_prob shape:', y_pred_prob.shape)
-    thresh_list = list()
+def score_roc(y_pred, y_test):
+    print('score roc ...')
+    print('y_pred[:10]:', y_pred[:10])
+    print('y_test[:10]:', y_test[:10])
+    fpr, tpr, thresholds = roc_curve(y_test, y_pred, pos_label=1)
+    # print('tpr: {}'.format(tpr))
+    # print('fpr: {}'.format(fpr))
+    # print('thresholds: {}'.format(thresholds))
 
-    uni_list = np.unique(y_test)
-    # print(uni_list)
-    # 基于每个类别进行二分类ROC曲线绘制，获取最佳阈值
-    for i in uni_list:
-        y_pred = y_pred_prob[:, i]
-        y_test_new = y_test == i
-        y_test_new = y_test_new.astype(int)
-        # 计算ROC曲线
-        # ROC curve
-        fpr, tpr, thresholds = roc_curve(y_test_new, y_pred, pos_label=1)
-        # print('tpr: {}'.format(tpr))
-        # print('fpr: {}'.format(fpr))
-        # print('thresholds: {}'.format(thresholds))
+    # 计算ROC曲线下面积
+    # the area under ROC curve
+    # print('y_pred shape:', y_pred.shape, ' y_test_new shape:', y_test_new.shape)
+    auc_score = roc_auc_score(y_test, y_pred)
+    roc_auc = auc(fpr, tpr)
+    # print('auc:', auc_score, ' roc_auc:', roc_auc)
+    assert auc_score == roc_auc
 
-        # 计算ROC曲线下面积
-        # the area under ROC curve
-        # print('y_pred shape:', y_pred.shape, ' y_test_new shape:', y_test_new.shape)
-        auc_score = roc_auc_score(y_test_new, y_pred)
-        roc_auc = auc(fpr, tpr)
-        # print('auc:', auc_score, ' roc_auc:', roc_auc)
-        assert auc_score == roc_auc
+    # 显示ROC曲线
+    # show ROC curve
+    display = RocCurveDisplay(fpr=fpr, tpr=tpr, roc_auc=roc_auc, estimator_name='example estimator')
+    display.plot()
+    # plt.show()
+    plt.savefig('./outputs/roc.jpg')
 
-        # # 显示ROC曲线
-        # # show ROC curve
-        # display = RocCurveDisplay(fpr=fpr, tpr=tpr, roc_auc=roc_auc, estimator_name='example estimator')
-        # display.plot()
-        # plt.show()
+    # 计算最佳阈值
+    # compute best threshold
+    thresh = thresholds[np.argmax(tpr - fpr)]
 
-        # 计算最佳阈值
-        # compute best threshold
-        thresh = thresholds[np.argmax(tpr - fpr)]
-        # print('thresh:', thresh)
-        thresh_list.append(thresh)
-
-    return thresh_list
+    return thresh
 
 
 if __name__ == '__main__':
-    csv_path = './outputs/probs.csv'
-    truths, pred_labels, pred_probs = load_data(csv_path)
+    args = parse_args()
+    pair_path = args.pair_path
+    test_path = args.test_path
 
-    top_5_acc = top_k_accuracy_score(truths, pred_probs, k=5)
-    top_5_acc_num = top_k_accuracy_score(truths, pred_probs, k=5, normalize=False)
-    print('top_5_acc:', top_5_acc, ' top_5_acc_num:', top_5_acc_num)
+    assert os.path.isfile(pair_path), pair_path
+    assert os.path.isfile(test_path), test_path
 
-    score(pred_labels, truths)
-    thresh_list = score_roc(pred_probs, truths)
-    # print(pred_probs[:10])
-    # print(thresh_list)
-    assert len(pred_probs[0]) == len(thresh_list)
+    pair_array = load_pairs(pair_path)
+    data_dict = load_data(test_path)
 
-    # 使用最佳阈值对每个预测概率进行过滤，然后再计算分类标签
-    tmp_array = np.array(pred_probs) >= np.array(thresh_list)
-    pred_probs_new = pred_probs * tmp_array
-    pred_labels_new = np.argmax(pred_probs_new, axis=1)
-    print(pred_labels_new)
+    probs_list, labels_list = compute_probs(pair_array, data_dict)
 
-    score(pred_labels_new, truths)
+    pred_labels_list = np.array(np.array(probs_list) > 0.5, dtype=int)
+    score(pred_labels_list, labels_list)
 
-    top_5_acc = top_k_accuracy_score(truths, pred_probs_new, k=5)
-    top_5_acc_num = top_k_accuracy_score(truths, pred_probs_new, k=5, normalize=False)
-    print('top_5_acc:', top_5_acc, ' top_5_acc_num:', top_5_acc_num)
+    best_th = score_roc(probs_list, labels_list)
+    print(f'best threshold: {best_th}')
+
+    pred_labels_list = np.array(np.array(probs_list) > best_th, dtype=int)
+    score(pred_labels_list, labels_list)
