@@ -24,6 +24,7 @@ from tqdm import tqdm
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('test_path', type=str, default=None, help='test path')
+    parser.add_argument('cls_path', type=str, default=None, help='cls path')
     parser.add_argument('--N', type=int, default=5, help='number of each class in match lib')
     parser.add_argument('--match_path', type=str, default=None, help='match path')
 
@@ -32,10 +33,24 @@ def parse_args():
     return args
 
 
+def load_cls(cls_path):
+    assert os.path.isfile(cls_path), cls_path
+
+    data_array = np.loadtxt(cls_path, delimiter=' ', dtype=str)
+
+    cls_label_dict = dict()
+    for label, cls in data_array:
+        assert cls not in cls_label_dict.keys()
+        # 对于CUB而言，label从1开始，所以需要相应的减去1
+        cls_label_dict[cls] = int(label) - 1
+
+    return cls_label_dict
+
+
 def load_data(csv_path):
     assert os.path.isfile(csv_path), csv_path
 
-    data_array = np.loadtxt(csv_path, delimiter=',', dtype=float)
+    data_array = np.loadtxt(csv_path, delimiter=',', dtype=str)
 
     return data_array
 
@@ -65,19 +80,16 @@ def cosine_similarity(vector_a, vector_b):
     return sim
 
 
-def process(data_array, match_dict, N):
-    label_array = np.unique(data_array[:, 0])
-    for label in label_array:
-        if label not in match_dict.keys():
-            match_dict[int(label)] = list()
-
+def process(data_array, cls_label_dict, match_dict, N):
     top1_num = 0
     top5_num = 0
 
     arr_len = len(data_array)
     for item in tqdm(data_array):
-        truth_label = int(item[0])
-        pred_feats = item[1:]
+        img_path = item[0]
+        cls_name = os.path.split(os.path.split(img_path)[0])[1]
+        truth_label = str(cls_label_dict[cls_name])
+        pred_feats = np.array(item[1:], dtype=float)
 
         # 将预测特征向量和模板库中所有的特征向量计算余弦相似度，然后排序top1/top5，查看真值标签是否存在于其中
         key_list = list()
@@ -110,6 +122,8 @@ def process(data_array, match_dict, N):
                     top5_num += 1
 
         # 每次完成后将预测特征向量加入模板库
+        if truth_label not in match_dict.keys():
+            match_dict[truth_label] = list()
         match_dict[truth_label].append(pred_feats)
         # # 如果模板库某一类别的特征数目大于指定数目，则按先进先出方式删除
         if len(match_dict[truth_label]) > N:
@@ -126,15 +140,25 @@ if __name__ == '__main__':
     args = parse_args()
     match_path = args.match_path
     test_path = args.test_path
+    cls_path = args.cls_path
     N = args.N
 
+    match_dict = dict()
     if match_path is not None:
         assert os.path.isfile(match_path), match_path
-        match_dict = load_match_lib(match_path)
-    else:
-        match_dict = dict()
+        tmp_dict = load_match_lib(match_path)
+
+        # 保证模板库中每个类别的特征个数不超过N个
+        for key, value in tmp_dict.items():
+            if len(value) > N:
+                match_dict[key] = value[-N:]
+            else:
+                match_dict[key] = value
+
+    assert cls_path is not None and os.path.isfile(cls_path), cls_path
+    cls_label_dict = load_cls(cls_path)
 
     assert os.path.isfile(test_path), test_path
     data_array = load_data(test_path)
 
-    process(data_array, match_dict, N)
+    process(data_array, cls_label_dict, match_dict, N)
